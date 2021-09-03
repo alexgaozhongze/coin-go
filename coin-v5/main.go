@@ -193,7 +193,7 @@ func buyCheck(s *market.SymbolCandlestick) bool {
 		return false
 	} else if close < lastHigh {
 		return false
-	} else if zf < 0.03 {
+	} else if zf < 0.09 {
 		return false
 	}
 
