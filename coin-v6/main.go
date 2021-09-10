@@ -26,6 +26,7 @@ var symbolsLastAmount = make(map[string]int64)
 var symbolsLastHigh = make(map[string]float64)
 var currencysBalance = make(map[string]float64)
 var MarketClient *client.MarketClient
+var AccountClient *client.AccountClient
 
 var lastDayTs int64
 var exit bool
@@ -64,12 +65,14 @@ func setLastDayTs() {
 }
 
 func handle() {
-	timeTickerChan := time.Tick(999999999)
-	for !exit {
-		setLastDayTs()
-		handler()
-		<-timeTickerChan
-	}
+	handler()
+
+	// timeTickerChan := time.Tick(999999999)
+	// for !exit {
+	// 	setLastDayTs()
+	// 	handler()
+	// 	<-timeTickerChan
+	// }
 }
 
 func handler() {
@@ -78,6 +81,8 @@ func handler() {
 		exit = true
 		applogger.Error("GetAllSymbolsLast24hCandlesticksAskBidError: %s", err)
 	} else {
+		maxUpPre := 0.0
+		maxUpSymbol := ""
 		for _, result := range resp {
 			if str4 := result.Symbol[len(result.Symbol)-4:]; str4 != "usdt" {
 				continue
@@ -89,30 +94,108 @@ func handler() {
 				continue
 			}
 
-			close, _ := result.Close.Float64()
-			symbolsPrice[result.Symbol] = close
-
-			if sellCheck(&result) {
-				applogger.Info("symbol sell %s", result.Symbol)
-				if orderId := sellHandle(result.Symbol, close); orderId != "" {
-					orderInfo := orderInfoHandle(orderId)
-
-					realAmount := orderInfo.FilledAmount
-					if realAmount > 0 {
-						balanceSync()
+			optionalRequest := market.GetCandlestickOptionalRequest{Period: market.DAY1, Size: 36}
+			respI, err := MarketClient.GetCandlestick(result.Symbol, optionalRequest)
+			if err != nil {
+				exit = true
+				applogger.Error("lastDayAmountError: %s", err)
+			} else {
+				curClose := 0.0
+				lastClose := 0.0
+				for _, resultI := range respI {
+					if curClose == 0.0 {
+						curClose, _ = resultI.Close.Float64()
+					} else {
+						lastClose, _ = resultI.Close.Float64()
 					}
+				}
+				curUpPre := 0.0
+				if lastClose != 0.0 {
+					curUpPre = curClose / lastClose
+				}
+				if curUpPre > maxUpPre {
+					maxUpPre = curUpPre
+					maxUpSymbol = result.Symbol
 				}
 			}
 
-			if buyCheck(&result) {
-				applogger.Info("symbol buy %s", result.Symbol)
-				if orderId := buyHandle(result.Symbol, close); orderId != "" {
-					orderInfo := orderInfoHandle(orderId)
+			close, _ := result.Close.Float64()
+			symbolsPrice[result.Symbol] = close
 
-					realAmount := orderInfo.FilledAmount
-					if realAmount > 0 {
-						balanceSync()
+			// if sellCheck(&result) {
+			// 	applogger.Info("symbol sell %s", result.Symbol)
+			// 	if orderId := sellHandle(result.Symbol, close); orderId != "" {
+			// 		orderInfo := orderInfoHandle(orderId)
+
+			// 		realAmount := orderInfo.FilledAmount
+			// 		if realAmount > 0 {
+			// 			balanceSync()
+			// 		}
+			// 	}
+			// }
+
+			// if buyCheck(&result) {
+			// 	applogger.Info("symbol buy %s", result.Symbol)
+			// 	if orderId := buyHandle(result.Symbol, close); orderId != "" {
+			// 		orderInfo := orderInfoHandle(orderId)
+
+			// 		realAmount := orderInfo.FilledAmount
+			// 		if realAmount > 0 {
+			// 			balanceSync()
+			// 		}
+			// 	}
+			// }
+		}
+		applogger.Info("%+v %+v", maxUpSymbol, maxUpPre)
+
+		maxAmountNum := 0.0
+		maxAmountSymbol := ""
+		resp, err := AccountClient.GetAccountBalance(config.AccountId)
+		if err != nil {
+			applogger.Error("Get account balance error: %s", err)
+		} else {
+			if resp.List != nil {
+				for _, result := range resp.List {
+					if result.Type != "trade" {
+						continue
 					}
+	
+					symbol := result.Currency + "usdt"
+					if value, ok := symbolsPrice[symbol]; ok {
+						balance, _ := strconv.ParseFloat(result.Balance, 64)
+						amount := value * balance
+						if amount > maxAmountNum {
+							maxAmountNum = amount
+							maxAmountSymbol = symbol
+						}
+					}
+				}
+			}
+		}
+		applogger.Info("%+v %+v", maxAmountSymbol, maxAmountNum)
+
+		if maxUpSymbol != maxAmountSymbol {
+			if maxAmountNum > 5.0 {
+				// sell
+				if orderId := sellHandle(maxAmountSymbol, symbolsPrice[maxAmountSymbol]); orderId != "" {
+					orderInfo := orderInfoHandle(orderId)
+					applogger.Info("sell	%+v", orderInfo)
+
+					// realAmount := orderInfo.FilledAmount
+					// if realAmount > 0 {
+					// 	balanceSync()
+					// }
+				}
+			} else {
+				// buy
+				if orderId := buyHandle(maxUpSymbol, symbolsPrice[maxUpSymbol]); orderId != "" {
+					orderInfo := orderInfoHandle(orderId)
+					applogger.Info("buy		%+v", orderInfo)
+
+					// realAmount := orderInfo.FilledAmount
+					// if realAmount > 0 {
+					// 	balanceSync()
+					// }
 				}
 			}
 		}
@@ -241,6 +324,7 @@ func dealAmount(symbol string, buy bool) bool {
 
 func initClient() {
 	MarketClient = new(client.MarketClient).Init(config.Host)
+	AccountClient = new(client.AccountClient).Init(config.AccessKey, config.SecretKey, config.Host)
 }
 
 func balanceSync() {
