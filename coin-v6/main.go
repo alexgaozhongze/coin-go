@@ -1,7 +1,7 @@
 package main
 
 import (
-	"fmt"
+	// "fmt"
 	"math"
 	"os"
 	"os/signal"
@@ -148,8 +148,10 @@ func handler() {
 		}
 		applogger.Info("%+v %+v", maxUpSymbol, maxUpPre)
 
+		amountUsdt := ""
 		maxAmountNum := 0.0
 		maxAmountSymbol := ""
+		maxAmountBalance := 0.0
 		resp, err := AccountClient.GetAccountBalance(config.AccountId)
 		if err != nil {
 			applogger.Error("Get account balance error: %s", err)
@@ -159,6 +161,11 @@ func handler() {
 					if result.Type != "trade" {
 						continue
 					}
+
+					if result.Currency == "usdt" {
+						amountUsdt = result.Balance
+						// amountUsdt, _ = strconv.ParseFloat(result.Balance, 64)
+					}
 	
 					symbol := result.Currency + "usdt"
 					if value, ok := symbolsPrice[symbol]; ok {
@@ -167,6 +174,7 @@ func handler() {
 						if amount > maxAmountNum {
 							maxAmountNum = amount
 							maxAmountSymbol = symbol
+							maxAmountBalance = balance
 						}
 					}
 				}
@@ -176,26 +184,14 @@ func handler() {
 
 		if maxUpSymbol != maxAmountSymbol {
 			if maxAmountNum > 5.0 {
-				// sell
-				if orderId := sellHandle(maxAmountSymbol, symbolsPrice[maxAmountSymbol]); orderId != "" {
+				if orderId := sellHandle(maxAmountSymbol, maxAmountBalance); orderId != "" {
 					orderInfo := orderInfoHandle(orderId)
 					applogger.Info("sell	%+v", orderInfo)
-
-					// realAmount := orderInfo.FilledAmount
-					// if realAmount > 0 {
-					// 	balanceSync()
-					// }
 				}
 			} else {
-				// buy
-				if orderId := buyHandle(maxUpSymbol, symbolsPrice[maxUpSymbol]); orderId != "" {
+				if orderId := buyHandle(maxUpSymbol, amountUsdt); orderId != "" {
 					orderInfo := orderInfoHandle(orderId)
 					applogger.Info("buy		%+v", orderInfo)
-
-					// realAmount := orderInfo.FilledAmount
-					// if realAmount > 0 {
-					// 	balanceSync()
-					// }
 				}
 			}
 		}
@@ -361,26 +357,36 @@ func infoSync() {
 	}
 }
 
-func buyHandle(symbol string, price float64) string {
+// func buyHandle(symbol string, price float64) string {
+func buyHandle(symbol string, amount string) string {
 	if _, ok := symbolInfo[symbol]; !ok {
 		infoSync()
 	}
 
 	client := new(client.OrderClient).Init(config.AccessKey, config.SecretKey, config.Host)
 
-	priceS := strconv.FormatFloat(price, 'E', -1, 64)
+	// priceS := strconv.FormatFloat(price, 'E', -1, 64)
 
-	amountUsdt := float64(DEALNUM)
-	amount := fmt.Sprintf("%."+strconv.Itoa(symbolInfo[symbol].AmountPrecision)+"f", amountUsdt/price)
+	// amountUsdt := float64(DEALNUM)
+	// amount := fmt.Sprintf("%."+strconv.Itoa(symbolInfo[symbol].AmountPrecision)+"f", amountUsdt/price)
+	index := strings.Index(amount, ".")
+
+	rAmound := amount[0 : index + 9]
+	// applogger.Info("%+v %+v", index, rAmound)
+
+	// os.Exit(0)
+
 
 	request := order.PlaceOrderRequest{
 		AccountId: config.AccountId,
-		Type:      "buy-ioc",
+		Type:      "buy-market",
 		Source:    "spot-api",
 		Symbol:    symbol,
-		Price:     priceS,
-		Amount:    amount,
+		// Price:     priceS,
+		Amount:    rAmound,
 	}
+	// applogger.Info("%+v", request)
+	// os.Exit(0)
 
 	resp, err := client.PlaceOrder(&request)
 	if err != nil {
@@ -400,26 +406,27 @@ func buyHandle(symbol string, price float64) string {
 	return ""
 }
 
-func sellHandle(symbol string, price float64) string {
+// func sellHandle(symbol string, price float64) string {
+func sellHandle(symbol string, balance float64) string {
 	if _, ok := symbolInfo[symbol]; !ok {
 		infoSync()
 	}
 
 	client := new(client.OrderClient).Init(config.AccessKey, config.SecretKey, config.Host)
 
-	priceS := strconv.FormatFloat(price, 'E', -1, 64)
+	// priceS := strconv.FormatFloat(price, 'E', -1, 64)
 
-	currency := symbol[0 : len(symbol)-4]
-	balance := currencysBalance[currency]
+	// currency := symbol[0 : len(symbol)-4]
+	// balance := currencysBalance[currency]
 
 	amountS := FormatFloat(balance, symbolInfo[symbol].AmountPrecision)
 
 	request := order.PlaceOrderRequest{
 		AccountId: config.AccountId,
-		Type:      "sell-ioc",
+		Type:      "sell-market",
 		Source:    "spot-api",
 		Symbol:    symbol,
-		Price:     priceS,
+		// Price:     priceS,
 		Amount:    amountS,
 	}
 
