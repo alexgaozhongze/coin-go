@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
-	"time"
+	// "time"
 	"github.com/huobirdcenter/huobi_golang/config"
 	"github.com/huobirdcenter/huobi_golang/logging/applogger"
 	"github.com/huobirdcenter/huobi_golang/pkg/client"
@@ -22,14 +22,12 @@ const DEALNUM int = 9
 
 var symbolInfo = make(map[string]common.Symbol)
 var symbolsPrice = make(map[string]float64)
-var symbolsLastAmount = make(map[string]int64)
-var symbolsLastHigh = make(map[string]float64)
 var currencysBalance = make(map[string]float64)
 var MarketClient *client.MarketClient
 var AccountClient *client.AccountClient
 
-var lastDayTs int64
-var exit bool
+// var lastDayTs int64
+// var exit bool
 
 type OrderInfo struct {
 	Amount       float64
@@ -44,7 +42,7 @@ func main() {
 		for s := range c {
 			switch s {
 			case syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT:
-				exit = true
+				// exit = true
 				applogger.Warn("Program Exit... %s", s)
 			default:
 				applogger.Warn("other signal %s", s)
@@ -58,27 +56,20 @@ func main() {
 	handle()
 }
 
-func setLastDayTs() {
-	timeStr := time.Now().AddDate(0, 0, -1).Format("20060102")
-	t, _ := time.ParseInLocation("20060102", timeStr, time.Local)
-	lastDayTs = t.Unix()
-}
+// func setLastDayTs() {
+// 	timeStr := time.Now().AddDate(0, 0, -1).Format("20060102")
+// 	t, _ := time.ParseInLocation("20060102", timeStr, time.Local)
+// 	lastDayTs = t.Unix()
+// }
 
 func handle() {
 	handler()
-
-	// timeTickerChan := time.Tick(999999999)
-	// for !exit {
-	// 	setLastDayTs()
-	// 	handler()
-	// 	<-timeTickerChan
-	// }
 }
 
 func handler() {
 	resp, err := MarketClient.GetAllSymbolsLast24hCandlesticksAskBid()
 	if err != nil {
-		exit = true
+		// exit = true
 		applogger.Error("GetAllSymbolsLast24hCandlesticksAskBidError: %s", err)
 	} else {
 		maxUpPre := 0.0
@@ -94,26 +85,31 @@ func handler() {
 				continue
 			}
 
-			optionalRequest := market.GetCandlestickOptionalRequest{Period: market.DAY1, Size: 36}
+			optionalRequest := market.GetCandlestickOptionalRequest{Period: market.DAY1, Size: 9}
 			respI, err := MarketClient.GetCandlestick(result.Symbol, optionalRequest)
 			if err != nil {
-				exit = true
+				// exit = true
 				applogger.Error("lastDayAmountError: %s", err)
 			} else {
+				maxClose := 0.0
 				curClose := 0.0
 				lastClose := 0.0
 				for _, resultI := range respI {
+					close, _ := resultI.Close.Float64()
+					if (close > maxClose) {
+						maxClose = close
+					}
 					if curClose == 0.0 {
-						curClose, _ = resultI.Close.Float64()
+						curClose = close
 					} else {
-						lastClose, _ = resultI.Close.Float64()
+						lastClose = close
 					}
 				}
 				curUpPre := 0.0
 				if lastClose != 0.0 {
 					curUpPre = curClose / lastClose
 				}
-				if curUpPre > maxUpPre {
+				if curClose == maxClose && curUpPre > maxUpPre {
 					maxUpPre = curUpPre
 					maxUpSymbol = result.Symbol
 				}
@@ -121,30 +117,6 @@ func handler() {
 
 			close, _ := result.Close.Float64()
 			symbolsPrice[result.Symbol] = close
-
-			// if sellCheck(&result) {
-			// 	applogger.Info("symbol sell %s", result.Symbol)
-			// 	if orderId := sellHandle(result.Symbol, close); orderId != "" {
-			// 		orderInfo := orderInfoHandle(orderId)
-
-			// 		realAmount := orderInfo.FilledAmount
-			// 		if realAmount > 0 {
-			// 			balanceSync()
-			// 		}
-			// 	}
-			// }
-
-			// if buyCheck(&result) {
-			// 	applogger.Info("symbol buy %s", result.Symbol)
-			// 	if orderId := buyHandle(result.Symbol, close); orderId != "" {
-			// 		orderInfo := orderInfoHandle(orderId)
-
-			// 		realAmount := orderInfo.FilledAmount
-			// 		if realAmount > 0 {
-			// 			balanceSync()
-			// 		}
-			// 	}
-			// }
 		}
 		applogger.Info("%+v %+v", maxUpSymbol, maxUpPre)
 
@@ -195,127 +167,7 @@ func handler() {
 				}
 			}
 		}
-
-		if !balanceCheck() {
-			exit = true
-		}
 	}
-}
-
-func buyCheck(s *market.SymbolCandlestick) bool {
-	if !balanceCheck() {
-		return false
-	} else if dealAmount(s.Symbol, true) {
-		return false
-	}
-
-	close, _ := s.Close.Float64()
-	high, _ := s.High.Float64()
-	closeToHigh := close / high
-
-	if closeToHigh < 0.99 {
-		return false
-	}
-
-	vol, _ := s.Vol.Float64()
-	if int64(vol) < 3000000 {
-		return false
-	}
-
-	var b strings.Builder
-	b.WriteString(s.Symbol)
-	b.WriteString(strconv.FormatInt(lastDayTs, 10))
-
-	var lastAmount int64
-	var lastResp []market.Candlestick
-	key := b.String()
-	if value, ok := symbolsLastAmount[key]; ok {
-		lastAmount = value
-	} else {
-		optionalRequest := market.GetCandlestickOptionalRequest{Period: market.DAY1, Size: 3}
-		resp, err := MarketClient.GetCandlestick(s.Symbol, optionalRequest)
-		lastResp = resp
-		if err != nil {
-			exit = true
-			applogger.Error("lastDayAmountError: %s", err)
-		} else {
-			for _, result := range resp {
-				if result.Id == lastDayTs {
-					lastAmount = result.Amount.IntPart()
-					symbolsLastAmount[key] = lastAmount
-					break
-				}
-			}
-		}
-	}
-
-	var lastHigh float64
-	if value, ok := symbolsLastHigh[key]; ok {
-		lastHigh = value
-	} else {
-		for i, result := range lastResp {
-			tmpHigh, _ := result.High.Float64()
-
-			if i != 0 && tmpHigh > lastHigh {
-				lastHigh = tmpHigh
-				symbolsLastHigh[key] = lastHigh
-			}
-		}
-	}
-
-	curAmount := s.Amount.IntPart()
-	open, _ := s.Open.Float64()
-	low, _ := s.Low.Float64()
-	zf := (high - low) / open
-
-	if curAmount < lastAmount {
-		return false
-	} else if close < lastHigh {
-		return false
-	} else if zf < 0.09 {
-		return false
-	}
-
-	return true
-}
-
-func sellCheck(s *market.SymbolCandlestick) bool {
-	if !dealAmount(s.Symbol, false) {
-		return false
-	}
-
-	close, _ := s.Close.Float64()
-	open, _ := s.Open.Float64()
-	high, _ := s.High.Float64()
-	low, _ := s.Low.Float64()
-
-	closeToHigh := high - close
-	lowToClose := close - low
-	zf := (high - low) / open
-
-	if zf < 0.09 {
-		return false
-	}
-
-	if closeToHigh < lowToClose * 2 {
-		return false
-	}
-
-	return true
-}
-
-func balanceCheck() bool {
-	return currencysBalance["usdt"] >= float64(DEALNUM)
-}
-
-func dealAmount(symbol string, buy bool) bool {
-	currency := symbol[0 : len(symbol)-4]
-
-	balance := currencysBalance[currency]
-	amount := balance * symbolsPrice[symbol]
-
-	minAmount, _ := symbolInfo[symbol].MinOrderValue.Float64()
-	return amount >= minAmount
 }
 
 func initClient() {
@@ -345,7 +197,7 @@ func infoSync() {
 	client := new(client.CommonClient).Init(config.Host)
 	resp, err := client.GetSymbols()
 	if err != nil {
-		exit = true
+		// exit = true
 		applogger.Error("Error3: %s", err)
 	} else {
 		for _, result := range resp {
@@ -357,7 +209,6 @@ func infoSync() {
 	}
 }
 
-// func buyHandle(symbol string, price float64) string {
 func buyHandle(symbol string, amount string) string {
 	if _, ok := symbolInfo[symbol]; !ok {
 		infoSync()
@@ -365,32 +216,20 @@ func buyHandle(symbol string, amount string) string {
 
 	client := new(client.OrderClient).Init(config.AccessKey, config.SecretKey, config.Host)
 
-	// priceS := strconv.FormatFloat(price, 'E', -1, 64)
-
-	// amountUsdt := float64(DEALNUM)
-	// amount := fmt.Sprintf("%."+strconv.Itoa(symbolInfo[symbol].AmountPrecision)+"f", amountUsdt/price)
 	index := strings.Index(amount, ".")
-
 	rAmound := amount[0 : index + 9]
-	// applogger.Info("%+v %+v", index, rAmound)
-
-	// os.Exit(0)
-
 
 	request := order.PlaceOrderRequest{
 		AccountId: config.AccountId,
 		Type:      "buy-market",
 		Source:    "spot-api",
 		Symbol:    symbol,
-		// Price:     priceS,
 		Amount:    rAmound,
 	}
-	// applogger.Info("%+v", request)
-	// os.Exit(0)
 
 	resp, err := client.PlaceOrder(&request)
 	if err != nil {
-		exit = true
+		// exit = true
 		applogger.Error(err.Error())
 	} else {
 		switch resp.Status {
@@ -406,18 +245,12 @@ func buyHandle(symbol string, amount string) string {
 	return ""
 }
 
-// func sellHandle(symbol string, price float64) string {
 func sellHandle(symbol string, balance float64) string {
 	if _, ok := symbolInfo[symbol]; !ok {
 		infoSync()
 	}
 
 	client := new(client.OrderClient).Init(config.AccessKey, config.SecretKey, config.Host)
-
-	// priceS := strconv.FormatFloat(price, 'E', -1, 64)
-
-	// currency := symbol[0 : len(symbol)-4]
-	// balance := currencysBalance[currency]
 
 	amountS := FormatFloat(balance, symbolInfo[symbol].AmountPrecision)
 
@@ -432,7 +265,7 @@ func sellHandle(symbol string, balance float64) string {
 
 	resp, err := client.PlaceOrder(&request)
 	if err != nil {
-		exit = true
+		// exit = true
 		applogger.Error(err.Error())
 	} else {
 		switch resp.Status {
