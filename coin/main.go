@@ -87,21 +87,23 @@ func main() {
 	OrderClient = new(client.OrderClient).Init(config.AccessKey, config.SecretKey, config.Host)
 
 	marketSync()
+	symbolInfoSync()
 
 	wg.Add(3)
-	go goSymbolInfo()
+	// go goSymbolInfo()
 	go goMarket()
 	go goKline()
+	go goDeal()
 	wg.Wait()
 }
 
-func goSymbolInfo() {
-	symbolInfoSync()
-	wg.Done()
-}
+// func goSymbolInfo() {
+// 	symbolInfoSync()
+// 	wg.Done()
+// }
 
 func goMarket() {
-	timeTickerChan := time.Tick(time.Second * 6)
+	timeTickerChan := time.Tick(time.Second * 9)
     for !exit {
 		marketSync()
         <-timeTickerChan
@@ -110,7 +112,7 @@ func goMarket() {
 }
 
 func goKline() {
-	timeTickerChan := time.Tick(time.Second * 3)
+	timeTickerChan := time.Tick(time.Second * 6)
     for !exit {
 		num := len(symbols)
 		if num != 0 {
@@ -120,6 +122,15 @@ func goKline() {
 			}
 			wgKline.Wait()
 		}
+        <-timeTickerChan
+    }
+	wg.Done()
+}
+
+func goDeal() {
+	timeTickerChan := time.Tick(time.Second * 3)
+    for !exit {
+		deal()
         <-timeTickerChan
     }
 	wg.Done()
@@ -169,7 +180,7 @@ func marketSync() {
 		}
 		sortedSymbol := sortMapByValue(symbolUp)
 
-		for _, symbol := range sortedSymbol[len(sortedSymbol) - 1:] {
+		for _, symbol := range sortedSymbol[len(sortedSymbol) - 9:] {
 			tSymbols = append(tSymbols, symbol.Key)
 		}
 		symbols = tSymbols
@@ -181,9 +192,13 @@ func kline(symbol string) {
 	init := true
 	var emaList []Ema
 	if value, ok := symbolEma[symbol]; ok {
-		num = 1
-		init = false
 		emaList = value
+
+		id := time.Now().Unix()
+		if id - value[len(value) - 1].Id < 96 {
+			num = 1
+			init = false
+		}
 	}
 
 	optionalRequest := market.GetCandlestickOptionalRequest{Period: market.MIN1, Size: num}
@@ -192,26 +207,9 @@ func kline(symbol string) {
 		exit = true
 		applogger.Error("GetCandlestickError: %s", err)
 	} else {
-		// abc := Ema{1, 1.2, 1.3, 1.3, 1.3}
-		// symbolEma["abc"] = append(symbolEma["abc"], abc)
+		for i := len(resp) - 1; i >= 0; i-- {
+			result := resp[i]
 
-		// abc1 := Ema{2, 1.2, 1.3, 1.3, 1.3}
-		// symbolEma["abc"] = append(symbolEma["abc"], abc1)
-
-		// abc2 := Ema{3, 1.2, 1.3, 1.3, 1.3}
-		// symbolEma["abc"] = append(symbolEma["abc"], abc2)
-
-		// abc3 := Ema{4, 1.2, 1.3, 1.3, 1.3}
-		// symbolEma["abc"] = append(symbolEma["abc"][1:], abc3)
-
-		// applogger.Info("%+v", symbolEma)
-		// applogger.Info("%+v", symbolEma["abc"][2])
-	
-		// os.Exit(0)
-
-		// var buy = symbolBuy[symbol]
-
-		for _, result := range resp {
 			close, _ := result.Close.Float64()
 
 			var preEma Ema
@@ -247,9 +245,11 @@ func kline(symbol string) {
 				}
 			}
 
-			applogger.Info("%+v", symbol)
+			// applogger.Info("%+v", symbol)
+			// for _, v := range emaList {
+			// 	applogger.Info("%+v", v)
+			// }
 
-			applogger.Info("%+v, %+v, %+v", symbol, emaList, idNew)
 
 			// close, _ := result.Close.Float64()
 
@@ -325,6 +325,21 @@ func kline(symbol string) {
 	}
 	symbolEma[symbol] = emaList
 	wgKline.Done()
+}
+
+func deal() {
+	for _, symbol := range symbols {
+		if emaList, ok := symbolEma[symbol]; ok {
+			applogger.Info("%+v", symbol)
+			for _, ema := range emaList {
+				applogger.Info("%+v", ema)
+			}
+
+			// buy   7-9(ema3 > ema9)      0-9   0-6(sum(abs(ema3-ema9)))  <   7-9(sum(ema3-ema9))
+
+			
+		}
+	}
 }
 
 func buyHandle(symbol string, price float64) (string) {
