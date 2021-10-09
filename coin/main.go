@@ -197,12 +197,11 @@ func kline(symbol string) {
 	init := true
 	var emaList []Ema
 	if value, ok := symbolEma[symbol]; ok {
-		emaList = value
-
 		id := time.Now().Unix()
 		if id - value[len(value) - 1].Id < 96 {
 			num = 1
 			init = false
+			emaList = value
 		}
 	}
 
