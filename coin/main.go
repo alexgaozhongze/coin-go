@@ -124,9 +124,9 @@ func goKline() {
 		}
         <-timeTickerChan
 
-		for k, v := range symbolEma {
-			applogger.Info("%+v %+v %+v", k, len(v), v)
-		}
+		// for k, v := range symbolEma {
+		// 	applogger.Info("%+v %+v %+v", k, len(v), v)
+		// }
 
     }
 	wg.Done()
@@ -348,7 +348,7 @@ func deal() {
 
 				if downKey > 33 && key > downKey {
 					if ema.Ema3 > ema.Ema9 {
-						// applogger.Info("%+v %+v %+v", symbol, downKey, ema)
+						applogger.Info("%+v %+v %+v", symbol, downKey, ema)
 					}
 				}
 
