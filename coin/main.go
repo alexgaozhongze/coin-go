@@ -123,6 +123,11 @@ func goKline() {
 			wgKline.Wait()
 		}
         <-timeTickerChan
+
+		for k, v := range symbolEma {
+			applogger.Info("%+v %+v %+v", k, len(v), v)
+		}
+
     }
 	wg.Done()
 }
@@ -180,7 +185,7 @@ func marketSync() {
 		}
 		sortedSymbol := sortMapByValue(symbolUp)
 
-		for _, symbol := range sortedSymbol[len(sortedSymbol) - 9:] {
+		for _, symbol := range sortedSymbol[len(sortedSymbol) - 3:] {
 			tSymbols = append(tSymbols, symbol.Key)
 		}
 		symbols = tSymbols
@@ -328,16 +333,45 @@ func kline(symbol string) {
 }
 
 func deal() {
+	// applogger.Info("%+v", symbols)
+	// symbols = []string{"fsnusdt"};
 	for _, symbol := range symbols {
 		if emaList, ok := symbolEma[symbol]; ok {
-			applogger.Info("%+v", symbol)
-			for _, ema := range emaList {
-				applogger.Info("%+v", ema)
+			// applogger.Info("%+v", symbol)
+
+			// for key, ema := range emaList {
+				// applogger.Info("%+v %+v", key, ema)
+			// }
+
+			downKey := 0
+			for key, ema := range emaList {
+				// applogger.Info("%+v %+v", key, ema)
+
+				if downKey > 33 && key > downKey {
+					if ema.Ema3 > ema.Ema9 {
+						// applogger.Info("%+v %+v %+v", symbol, downKey, ema)
+					}
+				}
+
+				if key < 18 || key >= CLOSENUM - 6 {
+					continue
+				}
+				downC := true
+				curEma := ema
+				for i := 1; i <= 6; i++ {
+					nextEma := emaList[key + i]
+					if nextEma.Ema9 - nextEma.Ema3 > curEma.Ema9 - curEma.Ema3 {
+						curEma = nextEma
+					} else {
+						downC = false
+						break;
+					}
+				}
+				if downC {
+					downKey = key + 6
+					// applogger.Info("%+v %+v", symbol, curEma)
+				}
 			}
-
-			// buy   7-9(ema3 > ema9)      0-9   0-6(sum(abs(ema3-ema9)))  <   7-9(sum(ema3-ema9))
-
-			
 		}
 	}
 }
